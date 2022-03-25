@@ -5,7 +5,7 @@ int main(int argc, char *argv[])
     minit();
 
     char c;
-    uint size, addr;
+    uint64 size, addr;
     while (1)
     {
         printf("> ");
@@ -16,12 +16,13 @@ int main(int argc, char *argv[])
         switch (c)
         {
         case 'f':
-            scanf("%u %u", &size, &addr);
+            scanf("%lx %lx", &size, &addr);
+            printf("size: %lx, addr: %lx\n", size, addr);
             lfree(size, (char *)(uint64)addr);
             lprint();
             break;
         case 'm':
-            scanf("%u", &size);
+            scanf("%lx", &size);
             lmalloc(size);
             lprint();
             break;

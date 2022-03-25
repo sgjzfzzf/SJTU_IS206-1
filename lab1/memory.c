@@ -7,6 +7,7 @@ void minit()
 {
     mem = malloc(MEM_SIZE);
     head = malloc(sizeof(struct map));
+    head->isused = 0;
     head->m_size = MEM_SIZE;
     head->m_addr = (char *)mem;
     head->prior = head;
@@ -18,54 +19,6 @@ void mfree()
 {
     listfree(head);
     free(mem);
-}
-
-struct map *findaddr(char *addr)
-{
-    if (IS_PRI_MAP(cur, addr))
-    {
-        return cur;
-    }
-    else
-    {
-        struct map *p = cur;
-        while (!IS_PRI_MAP(p, addr) && p != cur)
-        {
-            p = p->next;
-        }
-        if (p == cur)
-        {
-            return NULL;
-        }
-        else
-        {
-            return p;
-        }
-    }
-}
-
-struct map *findsize(uint size)
-{
-    if (cur->m_size >= size)
-    {
-        return cur;
-    }
-    else
-    {
-        struct map *p = cur;
-        while (p->m_size >= size && p != cur)
-        {
-            p = p->next;
-        }
-        if (p == cur)
-        {
-            return NULL;
-        }
-        else
-        {
-            return p;
-        }
-    }
 }
 
 struct map *insertnode(struct map *prior)
@@ -86,26 +39,11 @@ void deletenode(struct map *p)
     free(p);
 }
 
-void allocnode(struct map *p, uint size)
+struct map *findfree(struct map *p)
 {
-    p->m_size -= size;
-}
-
-void subnode(struct map *p, uint size)
-{
-    p->m_size += size;
-}
-
-struct map *listalloc(uint size)
-{
-    struct map *p = findsize(size);
-    if (p == NULL)
+    while (p->isused)
     {
-        fprintf(stderr, "cannot find enough memory\n");
-    }
-    else
-    {
-        allocnode(p, size);
+        p = p->next;
     }
     return p;
 }
@@ -121,57 +59,86 @@ void listfree(struct map *node)
     }
 }
 
-void *lmalloc(uint size)
+void *lmalloc(uint64 size)
 {
-    struct map *p = listalloc(size);
-    if (p == NULL)
+    cur = findfree(cur->next);
+    struct map *p = cur;
+    if (p->isused || p->m_size < size)
     {
-        fprintf(stderr, "cannot find suitable memory\n");
+        p = cur->next;
+        while (p != cur && (p->isused || p->m_size < size))
+        {
+            p = p->next;
+        }
+        if (p == cur)
+        {
+            fprintf(stderr, "cannot find enough memory\n");
+            return NULL;
+        }
     }
-    cur = p->next;
-    return ALLOC_START(p);
+    if (p->m_size == size)
+    {
+        p->isused = 1;
+        return p->m_addr;
+    }
+    else
+    {
+        struct map *q = insertnode(p);
+        p->m_size -= size;
+        q->isused = 1;
+        q->m_addr = p->m_addr + p->m_size;
+        q->m_size = size;
+        return q->m_addr;
+    }
 }
 
-void lfree(uint size, char *addr)
+void lfree(uint64 size, char *addr)
 {
-    struct map *p = findaddr(addr);
-    if (p == NULL)
+    struct map *p = cur;
+    if (!p->isused || p->m_addr != addr || p->m_size != size)
     {
-        fprintf(stderr, "cannot find related map\n");
-    }
-    else if (ALLOC_SIZE(p) == size)
-    {
-        if (ALLOC_START(p) == addr)
+        p = cur->next;
+        while (p != cur && (!p->isused || p->m_addr != addr || p->m_size != size))
         {
-            deletenode(p);
+            p = p->next;
         }
-        else
+        if (p == cur)
         {
-            fprintf(stderr, "free too much memory2\n");
+            fprintf(stderr, "cannot find assigned used block\n");
+            return;
         }
     }
-    else if (ALLOC_SIZE(p) > size)
+    // case 1:  ///free/// ///released/// ///free///
+    if (!IS_HEAD(p) && !IS_TAIL(p) && !p->prior->isused && !p->next->isused)
     {
-        if ((uint64)addr == 0 && (uint64)p->next->m_addr > size || IS_TAIL(p) && (uint64)addr + size - (uint64)mem == MEM_SIZE || (uint64)ALLOC_START(p) < (uint64)addr && (uint64)addr + size < (uint64)NEXT_ADDR(p))
-        {
-            struct map *p = insertnode(p);
-            p->m_size = size;
-            p->m_addr = addr;
-        }
-        else if (ALLOC_START(p) == addr)
-        {
-            p->m_size += size;
-        }
-        else if (!IS_TAIL(p) && (uint64)addr + size == (uint64)NEXT_ADDR(p))
-        {
-            p->next->m_size += size;
-            p->next->m_addr -= size;
-        }
-        else
-        {
-            fprintf(stderr, "free too much memory3\n");
-        }
+        struct map *prior = p->prior, *next = p->next;
+        prior->m_size += (p->m_size + next->m_size);
+        deletenode(p);
+        deletenode(next);
     }
+    // case 2:  ///free/// ///released/// ///used/// or ///free/// ///released/// end
+    else if (!IS_HEAD(p) && !p->prior->isused && (!IS_TAIL(p) && p->next->isused || IS_TAIL(p)))
+    {
+        p->prior->m_size += p->m_size;
+        deletenode(p);
+    }
+    // case 3:  ///used/// ///released/// ///free/// or start ///released/// ///free///
+    else if (!IS_TAIL(p) && !p->next->isused && (!IS_HEAD(p) && p->prior->isused || IS_HEAD(p)))
+    {
+        p->next->m_addr = p->m_addr;
+        p->next->m_size += p->m_size;
+        deletenode(p);
+    }
+    // case 4:  ///used/// ///released/// ///used/// or start ///released/// or ///released/// end
+    else if (IS_HEAD(p) || IS_TAIL(p) || !IS_HEAD(p) && !IS_TAIL(p) && p->prior->isused && p->next->isused)
+    {
+        p->isused = 0;
+    }
+    else
+    {
+        fprintf(stderr, "illegal release\n");
+    }
+    cur = findfree(cur);
 }
 
 void lprint()
@@ -182,7 +149,7 @@ void lprint()
     {
         do
         {
-            printf("free block: %lx, address: %lx, size: %lx\n", counter++, (uint64)p->m_addr, (uint64)p->m_size);
+            printf("block: %lx, is free:%lx, address: %lx, size: %lx, prior: %lx, next: %lx\n", counter++, p->isused, (uint64)p->m_addr, (uint64)p->m_size, (uint64)p->prior->m_addr, (uint64)p->next->m_addr);
             p = p->next;
         } while (p != head);
     }

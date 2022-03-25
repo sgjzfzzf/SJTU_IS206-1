@@ -17,7 +17,6 @@ int main(int argc, char *argv[])
         {
         case 'f':
             scanf("%lx %lx", &size, &addr);
-            printf("size: %lx, addr: %lx\n", size, addr);
             lfree(size, (char *)(uint64)addr);
             lprint();
             break;

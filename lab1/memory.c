@@ -1,8 +1,5 @@
 #include "memory.h"
 
-void *mem;
-struct map *head, *cur;
-
 void minit()
 {
     mem = malloc(MEM_SIZE);
@@ -57,11 +54,11 @@ void listfree(struct map *node)
         node = node->next;
         free(tmp);
     }
+    free(head);
 }
 
 void *lmalloc(uint64 size)
 {
-    cur = findfree(cur->next);
     struct map *p = cur;
     if (p->isused || p->m_size < size)
     {
@@ -76,6 +73,7 @@ void *lmalloc(uint64 size)
             return NULL;
         }
     }
+    cur = findfree(p->next);
     if (p->m_size == size)
     {
         p->isused = 1;
@@ -108,7 +106,7 @@ void lfree(uint64 size, char *addr)
             return;
         }
     }
-    // case 1:  ///free/// ///released/// ///free///
+    // case 0:  ///free/// ///released/// ///free///
     if (!IS_HEAD(p) && !IS_TAIL(p) && !p->prior->isused && !p->next->isused)
     {
         struct map *prior = p->prior, *next = p->next;
@@ -116,20 +114,20 @@ void lfree(uint64 size, char *addr)
         deletenode(p);
         deletenode(next);
     }
-    // case 2:  ///free/// ///released/// ///used/// or ///free/// ///released/// end
+    // case 1:  ///free/// ///released/// ///used/// or ///free/// ///released/// end
     else if (!IS_HEAD(p) && !p->prior->isused && (!IS_TAIL(p) && p->next->isused || IS_TAIL(p)))
     {
         p->prior->m_size += p->m_size;
         deletenode(p);
     }
-    // case 3:  ///used/// ///released/// ///free/// or start ///released/// ///free///
+    // case 2:  ///used/// ///released/// ///free/// or start ///released/// ///free///
     else if (!IS_TAIL(p) && !p->next->isused && (!IS_HEAD(p) && p->prior->isused || IS_HEAD(p)))
     {
         p->next->m_addr = p->m_addr;
         p->next->m_size += p->m_size;
         deletenode(p);
     }
-    // case 4:  ///used/// ///released/// ///used/// or start ///released/// or ///released/// end
+    // case 3:  ///used/// ///released/// ///used/// or start ///released/// ///used/// or ///used/// ///released/// end
     else if (IS_HEAD(p) || IS_TAIL(p) || !IS_HEAD(p) && !IS_TAIL(p) && p->prior->isused && p->next->isused)
     {
         p->isused = 0;
@@ -138,7 +136,6 @@ void lfree(uint64 size, char *addr)
     {
         fprintf(stderr, "illegal release\n");
     }
-    cur = findfree(cur);
 }
 
 void lprint()
@@ -149,7 +146,7 @@ void lprint()
     {
         do
         {
-            printf("block: %lx, is free:%lx, address: %lx, size: %lx, prior: %lx, next: %lx\n", counter++, p->isused, (uint64)p->m_addr, (uint64)p->m_size, (uint64)p->prior->m_addr, (uint64)p->next->m_addr);
+            printf("block: %lx, is used:%lx, address: %lx, size: %lx, prior: %lx, next: %lx\n", counter++, p->isused, (uint64)p->m_addr, (uint64)p->m_size, (uint64)p->prior->m_addr, (uint64)p->next->m_addr);
             p = p->next;
         } while (p != head);
     }
